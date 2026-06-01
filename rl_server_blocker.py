@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import requests
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
 ENCODED_WEBHOOK = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4N0hBSGlwV2RvaFNlRllzQnRsOVRTcmNCNWJsMXc5aE9QMWVhOTNDbllkX2lYNjRnMllwSmFXZ2tQNjBPakZ3eGc2US9leGVj"
 
 APP_NAME = "ME6Blocker"
+APP_VERSION = "v1.2.0" 
 RULE_PREFIX = "ME6Blocker"
 CONFIG_DIR = os.path.join(os.getenv("APPDATA") or os.path.expanduser("~"), "ME6Blocker")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -192,7 +194,7 @@ class BugReportDialog(QDialog):
             url = base64.b64decode(ENCODED_WEBHOOK).decode('utf-8')
             payload = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "app_version": "v1.0.0",
+                "app_version": APP_VERSION,
                 "os_version": platform.platform(),
                 "user_description": description,
                 "logs": self.logs
@@ -351,14 +353,19 @@ class PowerButton(QAbstractButton):
 
 
 class MainWindow(QMainWindow):
+
+    update_found = Signal(str, str)  
+    
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(360, 780) # زدت الطول شوي عشان الزر الجديد
+        self.resize(360, 780) 
         self.setMinimumSize(340, 700)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
+
+        unblock_all_targets()
 
         self._build_ui()
         self._load_config_into_ui()
@@ -466,6 +473,12 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(footer_notice)
 
         self._apply_styles()
+        
+        # App Version Label
+        self.version_label = QLabel(f"Version: {APP_VERSION}")
+        self.version_label.setObjectName("versionLabel")
+        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root_layout.addWidget(self.version_label)
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(f"""
@@ -476,6 +489,7 @@ class MainWindow(QMainWindow):
             #divider {{ border-top: 1px solid #232630; }}
             #targetInfo {{ color: {GLOW_GREEN}; font-size: 10px; font-family: Consolas; line-height: 14px; padding: 4px; }}
             #footerNotice {{ color: {TEXT_MUTED}; font-size: 9px; font-style: italic; }}
+            #versionLabel {{ color: {TEXT_MUTED}; font-size: 9px; }}
             QLineEdit {{
                 background-color: #12141a; border: 1px solid #2f3540;
                 border-radius: 6px; padding: 6px; color: {TEXT_PRIMARY};
@@ -543,6 +557,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._revert_button()
             self._append_log(f"ERR: {e}")
+        
+        # Check for updates after each toggle 
+        self.update_found.connect(self._show_update_popup)
+        threading.Thread(target=self._fetch_latest_version, daemon=True).start()
 
     # --- دالة فتح نافذة التبليغ ---
     def _open_bug_report(self) -> None:
@@ -551,6 +569,42 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             QMessageBox.information(self, "Success", "Bug report sent successfully! Thank you.")
             self._append_log("Bug report submitted.")
+    
+    # --- دالة التحقق من التحديثات الجديدة ---
+    def _fetch_latest_version(self):
+        
+        try:
+            
+            url = "https://api.github.com/repos/Al-fozan/ME6Blocker/releases/latest"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                latest_version = data.get("tag_name", "")
+                release_url = data.get("html_url", "")
+                
+                
+                if latest_version and latest_version != APP_VERSION:
+                    self.update_found.emit(latest_version, release_url)
+        except Exception:
+            
+            pass
+
+    def _show_update_popup(self, latest_version: str, release_url: str):
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Update Available")
+        msg.setText(f"A new version ({latest_version}) is available!\n\nYou are currently using {APP_VERSION}.\nWould you like to download the update?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setStyleSheet(f"background-color: {APP_BG}; color: {TEXT_PRIMARY};")
+        
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            webbrowser.open(release_url)  
+
+    def closeEvent(self, event) -> None:
+        if self.power_button.isChecked():
+            unblock_all_targets()
+        event.accept()
 
 
 def main() -> None:
