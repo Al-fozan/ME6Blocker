@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 import ctypes
 import json
 import math
 import os
+import platform
 import subprocess
 import sys
+import threading
+import requests
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -15,6 +19,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -26,9 +31,13 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+
+ENCODED_WEBHOOK = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4N0hBSGlwV2RvaFNlRllzQnRsOVRTcmNCNWJsMXc5aE9QMWVhOTNDbllkX2lYNjRnMllwSmFXZ2tQNjBPakZ3eGc2US9leGVj"
 
 APP_NAME = "ME6Blocker"
 RULE_PREFIX = "ME6Blocker"
@@ -43,6 +52,7 @@ TEXT_MUTED = "#8a8f9e"
 GLOW_GREEN = "#00ff66"
 GLOW_RED = "#ef4444"
 
+
 @dataclass(frozen=True)
 class ServerTarget:
     name: str
@@ -50,7 +60,6 @@ class ServerTarget:
     protocol: str = "any"
     remote_port: str = "any"
 
-# القائمة المحدثة بالكامل مع النطاق الثالث الجديد
 SERVER_TARGETS: list[ServerTarget] = [
     ServerTarget("Server Range 1", "34.164.0.0/16"),
     ServerTarget("Server Range 2", "34.165.0.0/16"),
@@ -97,7 +106,6 @@ def build_rule_name(target: ServerTarget, direction: str) -> str:
     return f"{RULE_PREFIX} - {target.remote_ip.replace('/', '_')} - {direction}"
 
 def unblock_target(target: ServerTarget) -> tuple[bool, str]:
-    # حذف قاعدتي الصادر والوارد معاً لضمان النظافة
     rule_out = build_rule_name(target, "OUT")
     rule_in = build_rule_name(target, "IN")
     
@@ -106,18 +114,15 @@ def unblock_target(target: ServerTarget) -> tuple[bool, str]:
     return True, f"Cleaned rules for {target.remote_ip}"
 
 def block_target(target: ServerTarget, program_path: str | None = None) -> tuple[bool, str]:
-    # تنظيف مسبق لمنع التكرار
     unblock_target(target)
     
     rule_out = build_rule_name(target, "OUT")
     rule_in = build_rule_name(target, "IN")
 
-    # قاعدة الاتصال الصادر (Outbound)
     args_out = [
         "add", "rule", f"name={rule_out}", "dir=out", "action=block",
         f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"
     ]
-    # قاعدة الاتصال الوارد (Inbound) - ضرورية لقتل عودة حزم الـ UDP السائبة
     args_in = [
         "add", "rule", f"name={rule_in}", "dir=in", "action=block",
         f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"
@@ -139,6 +144,75 @@ def block_all_targets(program_path: str | None = None) -> list[str]:
 
 def unblock_all_targets() -> list[str]:
     return [f"[{'OK' if ok else 'ERR'}] {msg}" for target in SERVER_TARGETS for ok, msg in [unblock_target(target)]]
+
+
+# --- نافذة تقرير الأخطاء الجديدة ---
+class BugReportDialog(QDialog):
+    report_finished = Signal(bool, str)
+
+    def __init__(self, logs: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Report a Bug")
+        self.resize(400, 300)
+        self.setStyleSheet(f"background-color: {APP_BG}; color: {TEXT_PRIMARY};")
+        self.logs = logs
+
+        layout = QVBoxLayout(self)
+        
+        layout.addWidget(QLabel("Please describe the issue you are facing:"))
+        self.desc_input = QTextEdit()
+        self.desc_input.setStyleSheet("background-color: #12141a; border: 1px solid #2f3540; padding: 5px;")
+        layout.addWidget(self.desc_input)
+
+        self.submit_btn = QPushButton("Submit Report")
+        self.submit_btn.setStyleSheet("background-color: #1d212b; border: 1px solid #2f3540; border-radius: 6px; padding: 10px; font-weight: bold;")
+        self.submit_btn.clicked.connect(self._send_report)
+        layout.addWidget(self.submit_btn)
+
+        self.report_finished.connect(self._on_report_finished)
+
+    def _send_report(self):
+        description = self.desc_input.toPlainText().strip()
+        if not description:
+            QMessageBox.warning(self, "Warning", "Please enter a description.")
+            return
+            
+        self.submit_btn.setEnabled(False)
+        self.submit_btn.setText("Sending...")
+        
+        # تشغيل الإرسال في مسار خلفي (Thread) عشان ما يعلق البرنامج
+        threading.Thread(target=self._post_data, args=(description,), daemon=True).start()
+
+    def _post_data(self, description):
+        try:
+            if ENCODED_WEBHOOK == "ضع_النص_المشفر_هنا" or not ENCODED_WEBHOOK:
+                self.report_finished.emit(False, "Webhook URL not configured in code.")
+                return
+
+            url = base64.b64decode(ENCODED_WEBHOOK).decode('utf-8')
+            payload = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "app_version": "v1.0.0",
+                "os_version": platform.platform(),
+                "user_description": description,
+                "logs": self.logs
+            }
+            # إرسال الطلب لجوجل
+            response = requests.post(url, json=payload, timeout=15)
+            if response.status_code in (200, 201, 302):
+                self.report_finished.emit(True, "Success")
+            else:
+                self.report_finished.emit(False, f"HTTP Error: {response.status_code}")
+        except Exception as e:
+            self.report_finished.emit(False, str(e))
+
+    def _on_report_finished(self, success: bool, msg: str):
+        if success:
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Error", f"Failed to send report:\n{msg}")
+            self.submit_btn.setEnabled(True)
+            self.submit_btn.setText("Submit Report")
 
 
 class PowerButton(QAbstractButton):
@@ -268,7 +342,6 @@ class PowerButton(QAbstractButton):
         painter.setBrush(button_gradient)
         painter.drawEllipse(button_rect)
 
-        # Text - تم مسح كلمة POWER بالكامل والاكتفاء بـ ON / OFF
         mode_text = "ON" if self.isChecked() else "OFF"
         mode_color = QColor("#ecfdf5") if self.isChecked() else QColor("#fecaca")
         
@@ -281,8 +354,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(360, 720)
-        self.setMinimumSize(340, 660)
+        self.resize(360, 780) # زدت الطول شوي عشان الزر الجديد
+        self.setMinimumSize(340, 700)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -366,7 +439,6 @@ class MainWindow(QMainWindow):
         path_row.addWidget(browse_btn)
         config_layout.addLayout(path_row)
 
-        # عرض نطاقات الأي بي تحت التارجت بشكل مبسط وذكي جداً داخل اللوحة
         ips_text = " | ".join([t.remote_ip for t in SERVER_TARGETS])
         target_info = QLabel(f"Targets Loaded ({len(SERVER_TARGETS)} Ranges):\n{ips_text}")
         target_info.setObjectName("targetInfo")
@@ -382,7 +454,12 @@ class MainWindow(QMainWindow):
         self.log_view.setObjectName("miniLog")
         root_layout.addWidget(self.log_view)
 
-        # Footer Notice - نص الإشعار القانوني بالأسفل للشفافية مع المستخدم
+        # 🐞 زر التبليغ عن الأخطاء الجديد 🐞
+        self.bug_btn = QPushButton("🐞 Report Bug")
+        self.bug_btn.clicked.connect(self._open_bug_report)
+        root_layout.addWidget(self.bug_btn)
+
+        # Footer Notice
         footer_notice = QLabel("Notice: This application dynamically modifies Windows Firewall rules.")
         footer_notice.setObjectName("footerNotice")
         footer_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -466,6 +543,15 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._revert_button()
             self._append_log(f"ERR: {e}")
+
+    # --- دالة فتح نافذة التبليغ ---
+    def _open_bug_report(self) -> None:
+        current_logs = self.log_view.toPlainText()
+        dialog = BugReportDialog(current_logs, self)
+        if dialog.exec():
+            QMessageBox.information(self, "Success", "Bug report sent successfully! Thank you.")
+            self._append_log("Bug report submitted.")
+
 
 def main() -> None:
     if sys.platform != "win32": return
