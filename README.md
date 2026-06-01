@@ -6,9 +6,9 @@
 
 ## ⏬ روابط التحميل المباشرة / Direct Download Links
 
-* **[تحميل البرنامج المحدث (ملف تشغيل مباشر) / Download Standalone EXE](https://github.com/Al-fozan/ME6Blocker/releases/download/v1.0.0/rl_server_blocker.exe)**
-* **[تحميل كود المشروع مضغوط / Download Source Code (ZIP)](https://github.com/Al-fozan/ME6Blocker/archive/refs/tags/v1.0.0.zip)**
-* **[تحميل كود المشروع مضغوط / Download Source Code (TAR.GZ)](https://github.com/Al-fozan/ME6Blocker/archive/refs/tags/v1.0.0.tar.gz)**
+* **[تحميل البرنامج المحدث (ملف تشغيل مباشر) / Download Standalone EXE](https://github.com/Al-fozan/ME6Blocker/releases/download/v1.1.0/rl_server_blocker.exe)**
+* **[تحميل كود المشروع مضغوط / Download Source Code (ZIP)](https://github.com/Al-fozan/ME6Blocker/archive/refs/tags/v1.1.0.zip)**
+* **[تحميل كود المشروع مضغوط / Download Source Code (TAR.GZ)](https://github.com/Al-fozan/ME6Blocker/archive/refs/tags/v1.1.0.tar.gz)**
 
 ---
 
