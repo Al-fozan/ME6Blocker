@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 ENCODED_WEBHOOK = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4N0hBSGlwV2RvaFNlRllzQnRsOVRTcmNCNWJsMXc5aE9QMWVhOTNDbllkX2lYNjRnMllwSmFXZ2tQNjBPakZ3eGc2US9leGVj"
 
 APP_NAME = "ME6Blocker"
-APP_VERSION = "v1.2.0" 
+APP_VERSION = "v1.2.1" 
 RULE_PREFIX = "ME6Blocker"
 CONFIG_DIR = os.path.join(os.getenv("APPDATA") or os.path.expanduser("~"), "ME6Blocker")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -226,7 +226,9 @@ class PowerButton(QAbstractButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMinimumSize(200, 200)
+        
+       
+        self.setMinimumSize(280, 280) 
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self._glow_level = 0.0
@@ -250,8 +252,8 @@ class PowerButton(QAbstractButton):
         self.toggled.connect(self._handle_toggled)
 
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(40)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(50) 
+        shadow.setOffset(0, 0) 
         shadow.setColor(QColor(0, 0, 0, 190))
         self.setGraphicsEffect(shadow)
         self._shadow_effect = shadow
@@ -310,7 +312,9 @@ class PowerButton(QAbstractButton):
         height = self.height()
         center = QPointF(width / 2, height / 2)
         press_offset = 4 * self._press_level
-        radius = min(width, height) / 2 - 10
+        
+        radius = min(width, height) / 2 - 50 
+        
         bezel_rect = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
         button_rect = bezel_rect.adjusted(10, 10, -10, -10)
 
@@ -431,9 +435,21 @@ class MainWindow(QMainWindow):
         config_layout = QVBoxLayout()
         config_layout.setSpacing(8)
 
+        
+        switch_layout = QHBoxLayout()
+        switch_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.path_filter_switch = QCheckBox("Filter by EXE Path")
         self.path_filter_switch.stateChanged.connect(self._save_config)
-        config_layout.addWidget(self.path_filter_switch)
+        switch_layout.addWidget(self.path_filter_switch)
+        
+        # النص التوضيحي المظلل
+        hint_label = QLabel("(Enable only if it affects other apps)")
+        hint_label.setObjectName("hintLabel")
+        switch_layout.addWidget(hint_label)
+        
+        switch_layout.addStretch() 
+        config_layout.addLayout(switch_layout)
 
         path_row = QHBoxLayout()
         self.program_path_input = QLineEdit()
@@ -490,6 +506,7 @@ class MainWindow(QMainWindow):
             #targetInfo {{ color: {GLOW_GREEN}; font-size: 10px; font-family: Consolas; line-height: 14px; padding: 4px; }}
             #footerNotice {{ color: {TEXT_MUTED}; font-size: 9px; font-style: italic; }}
             #versionLabel {{ color: {TEXT_MUTED}; font-size: 9px; }}
+            #hintLabel {{ color: #8a8f9e; font-size: 10px; font-style: italic; margin-top: 1px; }}
             QLineEdit {{
                 background-color: #12141a; border: 1px solid #2f3540;
                 border-radius: 6px; padding: 6px; color: {TEXT_PRIMARY};
