@@ -126,6 +126,16 @@ DEFAULT_CONFIG = {
     "skipped_version": ""
 }
 
+def resource_path(relative_path: str) -> str:
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
 def load_config_dict() -> dict:
     config = DEFAULT_CONFIG.copy()
     if os.path.isfile(CONFIG_FILE):
@@ -538,10 +548,16 @@ class MainWindow(QMainWindow):
 
     def _setup_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
-        icon = QIcon("logo.ico")
+        
+        
+        icon_path = resource_path("logo.ico")
+        icon = QIcon(icon_path)
+        
         if icon.isNull():
             icon = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+            
         self.tray_icon.setIcon(icon)
+        self.setWindowIcon(icon) 
         
         tray_menu = QMenu()
         open_action = tray_menu.addAction(self.t["tray_open"])

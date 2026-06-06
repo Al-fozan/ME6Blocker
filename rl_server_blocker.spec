@@ -5,7 +5,7 @@ a = Analysis(
     ['rl_server_blocker.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('logo.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
