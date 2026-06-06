@@ -11,11 +11,12 @@ import sys
 import threading
 import requests
 import webbrowser
+import winreg
 from dataclasses import dataclass
 from datetime import datetime
 
-from PySide6.QtCore import QEasingCurve, Property, QPointF, QRectF, Qt, QTimer, Signal, QPropertyAnimation
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtCore import QEasingCurve, Property, QPointF, QRectF, Qt, QTimer, Signal, QPropertyAnimation, QCoreApplication
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QIcon, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -35,13 +36,18 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QComboBox,
+    QSystemTrayIcon,
+    QMenu,
+    QStyle,
+    QRadioButton,
+    QButtonGroup
 )
-
 
 ENCODED_WEBHOOK = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4N0hBSGlwV2RvaFNlRllzQnRsOVRTcmNCNWJsMXc5aE9QMWVhOTNDbllkX2lYNjRnMllwSmFXZ2tQNjBPakZ3eGc2US9leGVj"
 
 APP_NAME = "ME6Blocker"
-APP_VERSION = "v1.2.1" 
+APP_VERSION = "v1.3.0" 
 RULE_PREFIX = "ME6Blocker"
 CONFIG_DIR = os.path.join(os.getenv("APPDATA") or os.path.expanduser("~"), "ME6Blocker")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -54,6 +60,104 @@ TEXT_MUTED = "#8a8f9e"
 GLOW_GREEN = "#00ff66"
 GLOW_RED = "#ef4444"
 
+# --- القاموس (Translations) ---
+TR = {
+    "en": {
+        "status_off": "STATUS: OFF",
+        "status_on": "BLOCKER: ACTIVE",
+        "filter_path": "Filter by EXE Path",
+        "hint": "(Enable only if it affects other apps)",
+        "targets": "Targets Loaded",
+        "report_bug": "🐞 Report Bug",
+        "notice": "Notice: This application dynamically modifies Windows Firewall rules.",
+        "settings": "⚙️ Settings",
+        "close_behavior": "When clicking Close (X):",
+        "close_exit": "Exit and Disable Blocker",
+        "close_tray": "Minimize to Tray (Keep Blocker ON)",
+        "startup_behavior": "Startup Behavior:",
+        "run_startup": "Run automatically with Windows",
+        "auto_enable": "Auto-enable Blocker on startup",
+        "language": "Interface Language:",
+        "save": "Save & Apply",
+        "cancel": "Cancel",
+        "update_title": "Update Available",
+        "update_msg": "A new version ({v}) is available!\n\nWould you like to download it?",
+        "btn_yes": "Yes, Download",
+        "btn_skip": "Skip this version",
+        "btn_no": "Remind me later",
+        "tray_open": "Open ME6Blocker",
+        "tray_exit": "Exit App (Disable Blocker)"
+    },
+    "ar": {
+        "status_off": "الحالة: متوقف",
+        "status_on": "الحظر: نشط ومفعل",
+        "filter_path": "حظر للعبة فقط (تحديد المسار)",
+        "hint": "(قم بتفعيله فقط إذا تأثرت البرامج الأخرى)",
+        "targets": "النطاقات المحظورة",
+        "report_bug": "🐞 الإبلاغ عن مشكلة",
+        "notice": "ملاحظة: هذا البرنامج يقوم بتعديل قواعد جدار حماية ويندوز ديناميكياً.",
+        "settings": "⚙️ الإعدادات",
+        "close_behavior": "عند إغلاق البرنامج (زر X):",
+        "close_exit": "إغلاق تام وإيقاف الحظر (الافتراضي)",
+        "close_tray": "إخفاء للشريط السفلي (إبقاء الحظر يعمل)",
+        "startup_behavior": "عند تشغيل الكمبيوتر:",
+        "run_startup": "تشغيل البرنامج تلقائياً مع ويندوز",
+        "auto_enable": "تفعيل الحظر تلقائياً عند التشغيل",
+        "language": "لغة البرنامج:",
+        "save": "حفظ وتطبيق",
+        "cancel": "إلغاء",
+        "update_title": "تحديث جديد متوفر",
+        "update_msg": "توجد نسخة جديدة ({v}) متاحة!\n\nهل ترغب في تحميلها الآن؟",
+        "btn_yes": "نعم، حمل التحديث",
+        "btn_skip": "تخطي هذه النسخة",
+        "btn_no": "ذكرني لاحقاً",
+        "tray_open": "فتح نافذة البرنامج",
+        "tray_exit": "إغلاق البرنامج وإيقاف الحظر"
+    }
+}
+
+DEFAULT_CONFIG = {
+    "program_path": "",
+    "use_program": False,
+    "close_behavior": "exit",
+    "run_startup": False,
+    "auto_enable": False,
+    "language": "en",
+    "skipped_version": ""
+}
+
+def load_config_dict() -> dict:
+    config = DEFAULT_CONFIG.copy()
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                config.update(saved)
+        except Exception:
+            pass
+    return config
+
+def save_config_dict(config: dict) -> None:
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f)
+    except Exception:
+        pass
+
+def set_run_on_startup(enable: bool):
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        if enable:
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{sys.executable}"')
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+    except Exception:
+        pass
 
 @dataclass(frozen=True)
 class ServerTarget:
@@ -68,14 +172,11 @@ SERVER_TARGETS: list[ServerTarget] = [
     ServerTarget("Server Range 3", "35.252.0.0/16"),
 ]
 
-def now_stamp() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+def now_stamp() -> str: return datetime.now().strftime("%H:%M:%S")
 
 def is_admin() -> bool:
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
+    try: return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception: return False
 
 def relaunch_as_admin() -> bool:
     try:
@@ -85,7 +186,6 @@ def relaunch_as_admin() -> bool:
         else:
             script_path = os.path.abspath(sys.argv[0])
             parameters = " ".join([f'"{script_path}"', *[f'"{arg}"' for arg in sys.argv[1:]]])
-
         result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, parameters, None, 1)
         return result > 32
     except Exception:
@@ -94,49 +194,29 @@ def relaunch_as_admin() -> bool:
 def run_netsh(args: list[str]) -> subprocess.CompletedProcess:
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = 0  # SW_HIDE
-
+    startupinfo.wShowWindow = 0
     return subprocess.run(
         ["netsh", "advfirewall", "firewall", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        startupinfo=startupinfo,
+        capture_output=True, text=True, check=False, startupinfo=startupinfo,
     )
 
 def build_rule_name(target: ServerTarget, direction: str) -> str:
     return f"{RULE_PREFIX} - {target.remote_ip.replace('/', '_')} - {direction}"
 
 def unblock_target(target: ServerTarget) -> tuple[bool, str]:
-    rule_out = build_rule_name(target, "OUT")
-    rule_in = build_rule_name(target, "IN")
-    
-    run_netsh(["delete", "rule", f"name={rule_out}"])
-    run_netsh(["delete", "rule", f"name={rule_in}"])
+    run_netsh(["delete", "rule", f"name={build_rule_name(target, 'OUT')}"])
+    run_netsh(["delete", "rule", f"name={build_rule_name(target, 'IN')}"])
     return True, f"Cleaned rules for {target.remote_ip}"
 
 def block_target(target: ServerTarget, program_path: str | None = None) -> tuple[bool, str]:
     unblock_target(target)
-    
-    rule_out = build_rule_name(target, "OUT")
-    rule_in = build_rule_name(target, "IN")
-
-    args_out = [
-        "add", "rule", f"name={rule_out}", "dir=out", "action=block",
-        f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"
-    ]
-    args_in = [
-        "add", "rule", f"name={rule_in}", "dir=in", "action=block",
-        f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"
-    ]
-
+    args_out = ["add", "rule", f"name={build_rule_name(target, 'OUT')}", "dir=out", "action=block", f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"]
+    args_in = ["add", "rule", f"name={build_rule_name(target, 'IN')}", "dir=in", "action=block", f"remoteip={target.remote_ip}", "protocol=any", "profile=any", "enable=yes"]
     if program_path:
         args_out.append(f"program={program_path}")
         args_in.append(f"program={program_path}")
-
     res_out = run_netsh(args_out)
     res_in = run_netsh(args_in)
-
     if res_out.returncode == 0 and res_in.returncode == 0:
         return True, f"Blocked {target.remote_ip} (IN/OUT)"
     return False, f"Failed to block {target.remote_ip}"
@@ -147,26 +227,115 @@ def block_all_targets(program_path: str | None = None) -> list[str]:
 def unblock_all_targets() -> list[str]:
     return [f"[{'OK' if ok else 'ERR'}] {msg}" for target in SERVER_TARGETS for ok, msg in [unblock_target(target)]]
 
+# --- نوافذ الواجهة ---
+class SettingsDialog(QDialog):
+    def __init__(self, config: dict, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.lang = config.get("language", "en")
+        self.t = TR[self.lang]
+        
+        self.setWindowTitle(self.t["settings"])
+        self.resize(340, 420)
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {APP_BG}; color: {TEXT_PRIMARY}; font-family: 'Segoe UI'; font-size: 12px; }}
+            QLabel {{ color: {TEXT_PRIMARY}; }}
+            QFrame#groupFrame {{ border: 1px solid #2f3540; border-radius: 6px; background-color: #12141a; }}
+            QRadioButton, QCheckBox {{ background: transparent; spacing: 8px; color: {TEXT_PRIMARY}; }}
+            QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 7px; border: 1px solid #414857; background: #1a1d24; }}
+            QRadioButton::indicator:checked {{ background: {GLOW_GREEN}; border: 3px solid #1a1d24; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid #414857; background: #1a1d24; }}
+            QCheckBox::indicator:checked {{ background: {GLOW_GREEN}; border: 1px solid {GLOW_GREEN}; }}
+        """)
 
-# --- نافذة تقرير الأخطاء الجديدة ---
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        # Close Behavior
+        layout.addWidget(QLabel(f"<b>{self.t['close_behavior']}</b>"))
+        frame1 = QFrame()
+        frame1.setObjectName("groupFrame")
+        lay1 = QVBoxLayout(frame1)
+        lay1.setContentsMargins(12, 12, 12, 12)
+        lay1.setSpacing(10)
+        
+        self.close_bg = QButtonGroup(self)
+        self.radio_exit = QRadioButton(self.t["close_exit"])
+        self.radio_tray = QRadioButton(self.t["close_tray"])
+        self.close_bg.addButton(self.radio_exit)
+        self.close_bg.addButton(self.radio_tray)
+        if config.get("close_behavior") == "tray": self.radio_tray.setChecked(True)
+        else: self.radio_exit.setChecked(True)
+        lay1.addWidget(self.radio_exit)
+        lay1.addWidget(self.radio_tray)
+        layout.addWidget(frame1)
+
+        # Startup Behavior
+        layout.addWidget(QLabel(f"<b>{self.t['startup_behavior']}</b>"))
+        frame2 = QFrame()
+        frame2.setObjectName("groupFrame")
+        lay2 = QVBoxLayout(frame2)
+        lay2.setContentsMargins(12, 12, 12, 12)
+        lay2.setSpacing(10)
+        
+        self.chk_startup = QCheckBox(self.t["run_startup"])
+        self.chk_auto_enable = QCheckBox(self.t["auto_enable"])
+        self.chk_startup.setChecked(config.get("run_startup", False))
+        self.chk_auto_enable.setChecked(config.get("auto_enable", False))
+        lay2.addWidget(self.chk_startup)
+        lay2.addWidget(self.chk_auto_enable)
+        layout.addWidget(frame2)
+
+        # Language
+        lang_layout = QHBoxLayout()
+        lang_layout.addWidget(QLabel(f"<b>{self.t['language']}</b>"))
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["English", "العربية"])
+        self.combo_lang.setCurrentIndex(1 if self.lang == "ar" else 0)
+        self.combo_lang.setStyleSheet(f"background-color: {PANEL_BG}; border: 1px solid #2f3540; padding: 4px; color: {TEXT_PRIMARY};")
+        lang_layout.addWidget(self.combo_lang)
+        layout.addLayout(lang_layout)
+
+        layout.addStretch()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_save = QPushButton(self.t["save"])
+        self.btn_cancel = QPushButton(self.t["cancel"])
+        self.btn_save.setStyleSheet(f"background-color: {GLOW_GREEN}; color: #000; font-weight: bold; padding: 8px; border-radius: 4px;")
+        self.btn_cancel.setStyleSheet("background-color: #272c38; color: #fff; padding: 8px; border-radius: 4px; border: 1px solid #2f3540;")
+        self.btn_save.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_save)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+
+    def get_updated_config(self) -> dict:
+        self.config["close_behavior"] = "tray" if self.radio_tray.isChecked() else "exit"
+        self.config["run_startup"] = self.chk_startup.isChecked()
+        self.config["auto_enable"] = self.chk_auto_enable.isChecked()
+        self.config["language"] = "ar" if self.combo_lang.currentIndex() == 1 else "en"
+        return self.config
+
 class BugReportDialog(QDialog):
     report_finished = Signal(bool, str)
 
     def __init__(self, logs: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Report a Bug")
+        self.lang = parent.config.get("language", "en") if parent else "en"
+        self.t = TR[self.lang]
+        self.setWindowTitle(self.t["report_bug"])
         self.resize(400, 300)
         self.setStyleSheet(f"background-color: {APP_BG}; color: {TEXT_PRIMARY};")
         self.logs = logs
 
         layout = QVBoxLayout(self)
-        
-        layout.addWidget(QLabel("Please describe the issue you are facing:"))
+        layout.addWidget(QLabel("الرجاء وصف المشكلة:" if self.lang == "ar" else "Please describe the issue:"))
         self.desc_input = QTextEdit()
         self.desc_input.setStyleSheet("background-color: #12141a; border: 1px solid #2f3540; padding: 5px;")
         layout.addWidget(self.desc_input)
 
-        self.submit_btn = QPushButton("Submit Report")
+        self.submit_btn = QPushButton("إرسال" if self.lang == "ar" else "Submit Report")
         self.submit_btn.setStyleSheet("background-color: #1d212b; border: 1px solid #2f3540; border-radius: 6px; padding: 10px; font-weight: bold;")
         self.submit_btn.clicked.connect(self._send_report)
         layout.addWidget(self.submit_btn)
@@ -175,22 +344,16 @@ class BugReportDialog(QDialog):
 
     def _send_report(self):
         description = self.desc_input.toPlainText().strip()
-        if not description:
-            QMessageBox.warning(self, "Warning", "Please enter a description.")
-            return
-            
+        if not description: return
         self.submit_btn.setEnabled(False)
-        self.submit_btn.setText("Sending...")
-        
-        # تشغيل الإرسال في مسار خلفي (Thread) عشان ما يعلق البرنامج
+        self.submit_btn.setText("جاري الإرسال..." if self.lang == "ar" else "Sending...")
         threading.Thread(target=self._post_data, args=(description,), daemon=True).start()
 
     def _post_data(self, description):
         try:
             if ENCODED_WEBHOOK == "ضع_النص_المشفر_هنا" or not ENCODED_WEBHOOK:
-                self.report_finished.emit(False, "Webhook URL not configured in code.")
+                self.report_finished.emit(False, "Webhook URL not configured.")
                 return
-
             url = base64.b64decode(ENCODED_WEBHOOK).decode('utf-8')
             payload = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -199,7 +362,6 @@ class BugReportDialog(QDialog):
                 "user_description": description,
                 "logs": self.logs
             }
-            # إرسال الطلب لجوجل
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code in (200, 201, 302):
                 self.report_finished.emit(True, "Success")
@@ -212,9 +374,9 @@ class BugReportDialog(QDialog):
         if success:
             self.accept()
         else:
-            QMessageBox.warning(self, "Error", f"Failed to send report:\n{msg}")
+            QMessageBox.warning(self, "Error", f"Failed:\n{msg}")
             self.submit_btn.setEnabled(True)
-            self.submit_btn.setText("Submit Report")
+            self.submit_btn.setText("إرسال" if self.lang == "ar" else "Submit Report")
 
 
 class PowerButton(QAbstractButton):
@@ -225,9 +387,6 @@ class PowerButton(QAbstractButton):
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-       
         self.setMinimumSize(280, 280) 
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
@@ -260,8 +419,7 @@ class PowerButton(QAbstractButton):
 
     def _advance_pulse(self) -> None:
         self._pulse_phase += 0.18
-        if self._pulse_phase > math.tau:
-            self._pulse_phase -= math.tau
+        if self._pulse_phase > math.tau: self._pulse_phase -= math.tau
         self.update()
 
     def _handle_pressed(self) -> None:
@@ -281,13 +439,10 @@ class PowerButton(QAbstractButton):
         self._glow_animation.setStartValue(self._glow_level)
         self._glow_animation.setEndValue(1.0 if checked else 0.0)
         self._glow_animation.start()
-
-        if checked:
-            self._pulse_timer.start()
+        if checked: self._pulse_timer.start()
         else:
             self._pulse_timer.stop()
             self._pulse_phase = 0.0
-
         self._shadow_effect.setColor(QColor(0, 255, 102, 130) if checked else QColor(0, 0, 0, 190))
         self.update()
 
@@ -308,17 +463,14 @@ class PowerButton(QAbstractButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        width = self.width()
-        height = self.height()
+        width, height = self.width(), self.height()
         center = QPointF(width / 2, height / 2)
         press_offset = 4 * self._press_level
-        
         radius = min(width, height) / 2 - 50 
         
         bezel_rect = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
         button_rect = bezel_rect.adjusted(10, 10, -10, -10)
 
-        # Bezel
         painter.setPen(QPen(QColor("#3b3f49"), 2))
         painter.setBrush(QColor("#2a2d36"))
         painter.drawEllipse(bezel_rect)
@@ -327,14 +479,12 @@ class PowerButton(QAbstractButton):
         pulse = 0.85 + 0.15 * math.sin(self._pulse_phase) if self.isChecked() else 0.0
         halo_strength = glow * pulse
 
-        # Halo Glow
         if halo_strength > 0.01:
             halo_rect = bezel_rect.adjusted(-12, -12, 12, 12)
             painter.setPen(QPen(QColor(0, 255, 102, int(150 * halo_strength)), 8))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(halo_rect)
 
-        # Button Surface
         button_gradient = QLinearGradient(button_rect.topLeft(), button_rect.bottomRight())
         if glow < 0.1:
             button_gradient.setColorAt(0.0, QColor("#4a111a"))
@@ -350,18 +500,20 @@ class PowerButton(QAbstractButton):
 
         mode_text = "ON" if self.isChecked() else "OFF"
         mode_color = QColor("#ecfdf5") if self.isChecked() else QColor("#fecaca")
-        
         painter.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         painter.setPen(mode_color)
         painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, mode_text)
 
 
 class MainWindow(QMainWindow):
-
     update_found = Signal(str, str)  
     
     def __init__(self) -> None:
         super().__init__()
+        self.config = load_config_dict()
+        self.lang = self.config.get("language", "en")
+        self.t = TR[self.lang]
+        
         self.setWindowTitle(APP_NAME)
         self.resize(360, 780) 
         self.setMinimumSize(340, 700)
@@ -371,48 +523,76 @@ class MainWindow(QMainWindow):
 
         unblock_all_targets()
 
+        self._setup_tray_icon()
         self._build_ui()
         self._load_config_into_ui()
         self._apply_console_state(False, "System initialized.")
 
-    def _load_config(self) -> tuple[str, bool]:
-        if not os.path.isfile(CONFIG_FILE):
-            return "", False
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            return str(config.get("program_path", "")), bool(config.get("use_program", False))
-        except Exception:
-            return "", False
+        # تطبيق خيار التشغيل التلقائي عند الفتح
+        if self.config.get("auto_enable", False):
+            QTimer.singleShot(500, lambda: self.power_button.setChecked(True))
+
+        # فحص التحديثات مرة واحدة فقط عند بدء البرنامج
+        self.update_found.connect(self._show_update_popup)
+        threading.Thread(target=self._fetch_latest_version, daemon=True).start()
+
+    def _setup_tray_icon(self):
+        self.tray_icon = QSystemTrayIcon(self)
+        icon = QIcon("logo.ico")
+        if icon.isNull():
+            icon = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        self.tray_icon.setIcon(icon)
+        
+        tray_menu = QMenu()
+        open_action = tray_menu.addAction(self.t["tray_open"])
+        exit_action = tray_menu.addAction(self.t["tray_exit"])
+        
+        open_action.triggered.connect(self.show)
+        exit_action.triggered.connect(self._force_exit)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.show()
+
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show()
 
     def _save_config(self) -> None:
-        try:
-            os.makedirs(CONFIG_DIR, exist_ok=True)
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump({
-                    "program_path": self.program_path_input.text().strip(),
-                    "use_program": bool(self.path_filter_switch.isChecked()),
-                }, f)
-        except Exception:
-            pass
+        self.config["program_path"] = self.program_path_input.text().strip()
+        self.config["use_program"] = bool(self.path_filter_switch.isChecked())
+        save_config_dict(self.config)
 
     def _load_config_into_ui(self) -> None:
-        path, use_prog = self._load_config()
-        self.program_path_input.setText(path)
+        self.program_path_input.setText(self.config.get("program_path", ""))
         self.path_filter_switch.blockSignals(True)
-        self.path_filter_switch.setChecked(use_prog)
+        self.path_filter_switch.setChecked(self.config.get("use_program", False))
         self.path_filter_switch.blockSignals(False)
 
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self.central_widget)
-        root_layout.setContentsMargins(22, 25, 22, 15)
+        root_layout.setContentsMargins(22, 15, 22, 15)
         root_layout.setSpacing(15)
 
-        # Header Title
+        # Header with Settings Button
+        header_layout = QHBoxLayout()
+        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn.setObjectName("settingsBtn")
+        self.settings_btn.setFixedSize(30, 30)
+        self.settings_btn.clicked.connect(self._open_settings)
+        header_layout.addWidget(self.settings_btn)
+        
         title = QLabel(APP_NAME)
         title.setObjectName("titleLabel")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root_layout.addWidget(title)
+        header_layout.addWidget(title)
+        
+        # Spacer for centering title
+        spacer = QWidget()
+        spacer.setFixedSize(30, 30)
+        header_layout.addWidget(spacer)
+        
+        root_layout.addLayout(header_layout)
 
         # Centralized Power Button
         self.power_button = PowerButton()
@@ -420,12 +600,12 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.power_button, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Status Label
-        self.status_label = QLabel("STATUS: OFF")
+        self.status_label = QLabel(self.t["status_off"])
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(self.status_label)
 
-        # Divider line
+        # Divider
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setObjectName("divider")
@@ -434,20 +614,16 @@ class MainWindow(QMainWindow):
         # Config Section
         config_layout = QVBoxLayout()
         config_layout.setSpacing(8)
-
         
         switch_layout = QHBoxLayout()
         switch_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.path_filter_switch = QCheckBox("Filter by EXE Path")
+        self.path_filter_switch = QCheckBox(self.t["filter_path"])
         self.path_filter_switch.stateChanged.connect(self._save_config)
         switch_layout.addWidget(self.path_filter_switch)
         
-        # النص التوضيحي المظلل
-        hint_label = QLabel("(Enable only if it affects other apps)")
+        hint_label = QLabel(self.t["hint"])
         hint_label.setObjectName("hintLabel")
         switch_layout.addWidget(hint_label)
-        
         switch_layout.addStretch() 
         config_layout.addLayout(switch_layout)
 
@@ -463,7 +639,7 @@ class MainWindow(QMainWindow):
         config_layout.addLayout(path_row)
 
         ips_text = " | ".join([t.remote_ip for t in SERVER_TARGETS])
-        target_info = QLabel(f"Targets Loaded ({len(SERVER_TARGETS)} Ranges):\n{ips_text}")
+        target_info = QLabel(f"{self.t['targets']} ({len(SERVER_TARGETS)}):\n{ips_text}")
         target_info.setObjectName("targetInfo")
         target_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         config_layout.addWidget(target_info)
@@ -477,20 +653,19 @@ class MainWindow(QMainWindow):
         self.log_view.setObjectName("miniLog")
         root_layout.addWidget(self.log_view)
 
-        # 🐞 زر التبليغ عن الأخطاء الجديد 🐞
-        self.bug_btn = QPushButton("🐞 Report Bug")
+        # Bug Report
+        self.bug_btn = QPushButton(self.t["report_bug"])
         self.bug_btn.clicked.connect(self._open_bug_report)
         root_layout.addWidget(self.bug_btn)
 
         # Footer Notice
-        footer_notice = QLabel("Notice: This application dynamically modifies Windows Firewall rules.")
+        footer_notice = QLabel(self.t["notice"])
         footer_notice.setObjectName("footerNotice")
         footer_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(footer_notice)
 
         self._apply_styles()
         
-        # App Version Label
         self.version_label = QLabel(f"Version: {APP_VERSION}")
         self.version_label.setObjectName("versionLabel")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -507,23 +682,15 @@ class MainWindow(QMainWindow):
             #footerNotice {{ color: {TEXT_MUTED}; font-size: 9px; font-style: italic; }}
             #versionLabel {{ color: {TEXT_MUTED}; font-size: 9px; }}
             #hintLabel {{ color: #8a8f9e; font-size: 10px; font-style: italic; margin-top: 1px; }}
-            QLineEdit {{
-                background-color: #12141a; border: 1px solid #2f3540;
-                border-radius: 6px; padding: 6px; color: {TEXT_PRIMARY};
-            }}
-            QPushButton {{
-                background-color: #1d212b; border: 1px solid #2f3540;
-                border-radius: 6px; padding: 6px; font-weight: bold;
-            }}
+            #settingsBtn {{ background: transparent; border: none; font-size: 18px; }}
+            #settingsBtn:hover {{ color: {GLOW_GREEN}; }}
+            QLineEdit {{ background-color: #12141a; border: 1px solid #2f3540; border-radius: 6px; padding: 6px; color: {TEXT_PRIMARY}; }}
+            QPushButton {{ background-color: #1d212b; border: 1px solid #2f3540; border-radius: 6px; padding: 6px; font-weight: bold; }}
             QPushButton:hover {{ background-color: #272c38; }}
             QCheckBox {{ spacing: 8px; color: {TEXT_PRIMARY}; }}
             QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #414857; background: #12141a; }}
             QCheckBox::indicator:checked {{ background: {GLOW_GREEN}; border: 1px solid {GLOW_GREEN}; }}
-            #miniLog {{
-                background-color: #0e1015; border: 1px solid #232630;
-                border-radius: 8px; padding: 8px; font-family: Consolas;
-                color: #a0a6b5; font-size: 10px;
-            }}
+            #miniLog {{ background-color: #0e1015; border: 1px solid #232630; border-radius: 8px; padding: 8px; font-family: Consolas; color: #a0a6b5; font-size: 10px; }}
         """)
 
     def _browse_program(self) -> None:
@@ -542,7 +709,7 @@ class MainWindow(QMainWindow):
         self.power_button.blockSignals(False)
         self.power_button._handle_toggled(enabled)
         
-        self.status_label.setText("BLOCKER: ACTIVE" if enabled else "BLOCKER: DISABLED")
+        self.status_label.setText(self.t["status_on"] if enabled else self.t["status_off"])
         self.status_label.setStyleSheet(f"color: {GLOW_GREEN if enabled else TEXT_MUTED};")
         self._append_log(detail)
 
@@ -574,54 +741,77 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._revert_button()
             self._append_log(f"ERR: {e}")
-        
-        # Check for updates after each toggle 
-        self.update_found.connect(self._show_update_popup)
-        threading.Thread(target=self._fetch_latest_version, daemon=True).start()
 
-    # --- دالة فتح نافذة التبليغ ---
+    def _open_settings(self) -> None:
+        # save current language to check for changes later
+        old_lang = self.config.get("language", "en")
+        
+        dlg = SettingsDialog(self.config, self)
+        if dlg.exec():
+            new_config = dlg.get_updated_config()
+            new_lang = new_config.get("language", "en")
+            
+            self.config.update(new_config)
+            save_config_dict(self.config)
+            set_run_on_startup(self.config.get("run_startup", False))
+            
+            
+            if old_lang != new_lang:
+                QMessageBox.information(self, "Restart Required", "Settings saved! Please restart the app to apply language changes." if self.lang == "en" else "تم الحفظ! يرجى إعادة تشغيل البرنامج لتطبيق تغيير اللغة.")
+
     def _open_bug_report(self) -> None:
         current_logs = self.log_view.toPlainText()
         dialog = BugReportDialog(current_logs, self)
         if dialog.exec():
-            QMessageBox.information(self, "Success", "Bug report sent successfully! Thank you.")
+            QMessageBox.information(self, "Success", "Bug report sent!" if self.lang == "en" else "تم إرسال التقرير بنجاح، شكراً لك.")
             self._append_log("Bug report submitted.")
     
-    # --- دالة التحقق من التحديثات الجديدة ---
     def _fetch_latest_version(self):
-        
         try:
-            
             url = "https://api.github.com/repos/Al-fozan/ME6Blocker/releases/latest"
             response = requests.get(url, timeout=5)
-            
             if response.status_code == 200:
                 data = response.json()
                 latest_version = data.get("tag_name", "")
                 release_url = data.get("html_url", "")
                 
-                
-                if latest_version and latest_version != APP_VERSION:
+                skipped = self.config.get("skipped_version", "")
+                if latest_version and latest_version != APP_VERSION and latest_version != skipped:
                     self.update_found.emit(latest_version, release_url)
         except Exception:
-            
             pass
 
     def _show_update_popup(self, latest_version: str, release_url: str):
-        
         msg = QMessageBox(self)
-        msg.setWindowTitle("Update Available")
-        msg.setText(f"A new version ({latest_version}) is available!\n\nYou are currently using {APP_VERSION}.\nWould you like to download the update?")
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setWindowTitle(self.t["update_title"])
+        msg.setText(self.t["update_msg"].format(v=latest_version))
         msg.setStyleSheet(f"background-color: {APP_BG}; color: {TEXT_PRIMARY};")
         
-        if msg.exec() == QMessageBox.StandardButton.Yes:
+        btn_yes = msg.addButton(self.t["btn_yes"], QMessageBox.ButtonRole.AcceptRole)
+        btn_skip = msg.addButton(self.t["btn_skip"], QMessageBox.ButtonRole.RejectRole)
+        btn_no = msg.addButton(self.t["btn_no"], QMessageBox.ButtonRole.RejectRole)
+        
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        if clicked == btn_yes:
             webbrowser.open(release_url)  
+        elif clicked == btn_skip:
+            self.config["skipped_version"] = latest_version
+            save_config_dict(self.config)
 
     def closeEvent(self, event) -> None:
+        if self.config.get("close_behavior") == "tray":
+            event.ignore()
+            self.hide()
+            self.tray_icon.showMessage(APP_NAME, "Running in background..." if self.lang == "en" else "البرنامج يعمل في الخلفية...", QSystemTrayIcon.MessageIcon.Information, 2000)
+        else:
+            self._force_exit()
+
+    def _force_exit(self):
         if self.power_button.isChecked():
             unblock_all_targets()
-        event.accept()
+        QCoreApplication.quit()
 
 
 def main() -> None:
@@ -635,6 +825,11 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    
+    config = load_config_dict()
+    if config.get("language") == "ar":
+        app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
