@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 ENCODED_WEBHOOK = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4N0hBSGlwV2RvaFNlRllzQnRsOVRTcmNCNWJsMXc5aE9QMWVhOTNDbllkX2lYNjRnMllwSmFXZ2tQNjBPakZ3eGc2US9leGVj"
 
 APP_NAME = "ME6Blocker"
-APP_VERSION = "v1.3.0" 
+APP_VERSION = "v1.4.0" 
 RULE_PREFIX = "ME6Blocker"
 CONFIG_DIR = os.path.join(os.getenv("APPDATA") or os.path.expanduser("~"), "ME6Blocker")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -86,7 +86,8 @@ TR = {
         "btn_skip": "Skip this version",
         "btn_no": "Remind me later",
         "tray_open": "Open ME6Blocker",
-        "tray_exit": "Exit App (Disable Blocker)"
+        "tray_exit": "Exit App (Disable Blocker)",
+        "support_me": "💖 Support Me"
     },
     "ar": {
         "status_off": "الحالة: متوقف",
@@ -112,7 +113,8 @@ TR = {
         "btn_skip": "تخطي هذه النسخة",
         "btn_no": "ذكرني لاحقاً",
         "tray_open": "فتح نافذة البرنامج",
-        "tray_exit": "إغلاق البرنامج وإيقاف الحظر"
+        "tray_exit": "إغلاق البرنامج وإيقاف الحظر",
+        "support_me": "💖 ادعمني"
     }
 }
 
@@ -176,11 +178,33 @@ class ServerTarget:
     protocol: str = "any"
     remote_port: str = "any"
 
-SERVER_TARGETS: list[ServerTarget] = [
+# تحديث الايبيات تلقائيا 
+TARGETS_URL = "https://gist.githubusercontent.com/Al-fozan/834f77cb5e1a8e7e2ce310159c8ba013/raw/ips.json"
+
+# آيبيات احتياطية في حال ما كان فيه إنترنت عند المستخدم وقت تشغيل البرنامج
+DEFAULT_TARGETS: list[ServerTarget] = [
     ServerTarget("Server Range 1", "34.164.0.0/16"),
     ServerTarget("Server Range 2", "34.165.0.0/16"),
     ServerTarget("Server Range 3", "35.252.0.0/16"),
 ]
+
+# القائمة الأساسية اللي بيستخدمها البرنامج
+SERVER_TARGETS: list[ServerTarget] = DEFAULT_TARGETS.copy()
+
+def update_targets_from_cloud():
+    global SERVER_TARGETS
+    try:
+        response = requests.get(TARGETS_URL, timeout=3)
+        if response.status_code == 200:
+            cloud_data = response.json()
+            new_targets = []
+            for item in cloud_data:
+                new_targets.append(ServerTarget(item["name"], item["ip"]))
+            
+            if new_targets:
+                SERVER_TARGETS = new_targets
+    except Exception:
+        pass
 
 def now_stamp() -> str: return datetime.now().strftime("%H:%M:%S")
 
@@ -531,6 +555,9 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
 
+        # 🚀 التعديل المضاف: استدعاء التحديث من السحابة هنا قبل فك الحظر وبناء الواجهة
+        update_targets_from_cloud()
+
         unblock_all_targets()
 
         self._setup_tray_icon()
@@ -548,7 +575,6 @@ class MainWindow(QMainWindow):
 
     def _setup_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
-        
         
         icon_path = resource_path("logo.ico")
         icon = QIcon(icon_path)
@@ -680,12 +706,22 @@ class MainWindow(QMainWindow):
         footer_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(footer_notice)
 
+        # --- زر الدعم (Support Button) ---
+        self.support_btn = QPushButton(self.t["support_me"])
+        self.support_btn.setObjectName("supportBtn")
+        self.support_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.support_btn.clicked.connect(self._open_support_link)
+        root_layout.addWidget(self.support_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+
         self._apply_styles()
         
         self.version_label = QLabel(f"Version: {APP_VERSION}")
         self.version_label.setObjectName("versionLabel")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(self.version_label)
+
+    def _open_support_link(self) -> None:
+        webbrowser.open("https://creators.sa/fozy1")
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(f"""
@@ -703,6 +739,22 @@ class MainWindow(QMainWindow):
             QLineEdit {{ background-color: #12141a; border: 1px solid #2f3540; border-radius: 6px; padding: 6px; color: {TEXT_PRIMARY}; }}
             QPushButton {{ background-color: #1d212b; border: 1px solid #2f3540; border-radius: 6px; padding: 6px; font-weight: bold; }}
             QPushButton:hover {{ background-color: #272c38; }}
+            
+            /* ستايل زر الدعم */
+            #supportBtn {{
+                background-color: #1a1423;
+                border: 1px solid #4a2b50;
+                border-radius: 6px;
+                padding: 6px 18px;
+                color: #d4a5e3;
+                font-weight: bold;
+            }}
+            #supportBtn:hover {{
+                background-color: #261e35;
+                border: 1px solid #6b3f75;
+                color: #f1caff;
+            }}
+            
             QCheckBox {{ spacing: 8px; color: {TEXT_PRIMARY}; }}
             QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid #414857; background: #12141a; }}
             QCheckBox::indicator:checked {{ background: {GLOW_GREEN}; border: 1px solid {GLOW_GREEN}; }}
